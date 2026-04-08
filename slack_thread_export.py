@@ -175,28 +175,6 @@ def fetch_thread(
 
 
 # ---------------------------------------------------------------------------
-# Incremental-update support: skip already-exported threads
-# ---------------------------------------------------------------------------
-
-def load_exported_keys(output_file: Path) -> Set[Tuple[str, str]]:
-    """Return (channel_id, thread_ts) pairs already present in the JSONL file."""
-    exported: Set[Tuple[str, str]] = set()
-    if not output_file.exists():
-        return exported
-    with open(output_file) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-                exported.add((rec["channel_id"], rec["thread_ts"]))
-            except (json.JSONDecodeError, KeyError):
-                pass
-    return exported
-
-
-# ---------------------------------------------------------------------------
 # Main export routine
 # ---------------------------------------------------------------------------
 
@@ -221,18 +199,10 @@ def export_threads(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    date_tag = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
-    output_file = output_path / f"threads_{date_tag}.jsonl"
-
     print(f"User   : {user}")
     print(f"Range  : {start_date.date()} → {end_date.date()} ({days} days)")
-    print(f"Output : {output_file}")
+    print(f"Output : {output_path}/")
     print()
-
-    # Load already-exported keys so re-runs are safe (append-only, no dupes)
-    already_exported = load_exported_keys(output_file)
-    if already_exported:
-        print(f"Skipping {len(already_exported)} already-exported threads.\n")
 
     # ── Step 1: collect thread ids ──────────────────────────────────────────
     print("Step 1 – searching for user messages (newest first)…")
@@ -245,7 +215,11 @@ def export_threads(
             seen_set.add(key)
             thread_keys.append(key)
 
-    new_keys = [k for k in thread_keys if k not in already_exported]
+    # Incremental: skip threads that already have a file on disk
+    new_keys = [
+        (c, t) for c, t in thread_keys
+        if not (output_path / f"{c}_{t}.json").exists()
+    ]
 
     print(
         f"\nFound {len(thread_keys)} unique thread(s); "
@@ -261,33 +235,33 @@ def export_threads(
     exported_count = 0
     failed_count = 0
 
-    with open(output_file, "a") as fh:
-        for i, (channel_id, thread_ts) in enumerate(new_keys, 1):
-            print(
-                f"  [{i:>4}/{len(new_keys)}] channel={channel_id}  "
-                f"thread_ts={thread_ts}  ({_ts_to_date(float(thread_ts))})",
-                flush=True,
-            )
-            try:
-                messages = fetch_thread(client, channel_id, thread_ts)
-                record = {
-                    "channel_id": channel_id,
-                    "thread_ts": thread_ts,
-                    "message_count": len(messages),
-                    "messages": messages,
-                    "exported_at": datetime.now().isoformat(),
-                }
-                fh.write(json.dumps(record) + "\n")
-                exported_count += 1
-            except SlackApiError as e:
-                error = e.response.get("error", "unknown")
-                print(f"         ERROR [{error}] – skipping thread")
-                failed_count += 1
-            except Exception as exc:
-                print(f"         ERROR [{exc}] – skipping thread")
-                failed_count += 1
+    for i, (channel_id, thread_ts) in enumerate(new_keys, 1):
+        out_file = output_path / f"{channel_id}_{thread_ts}.json"
+        print(
+            f"  [{i:>4}/{len(new_keys)}] {out_file.name}"
+            f"  ({_ts_to_date(float(thread_ts))})",
+            flush=True,
+        )
+        try:
+            messages = fetch_thread(client, channel_id, thread_ts)
+            record = {
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+                "message_count": len(messages),
+                "messages": messages,
+                "exported_at": datetime.now().isoformat(),
+            }
+            out_file.write_text(json.dumps(record) + "\n")
+            exported_count += 1
+        except SlackApiError as e:
+            error = e.response.get("error", "unknown")
+            print(f"         ERROR [{error}] – skipping thread")
+            failed_count += 1
+        except Exception as exc:
+            print(f"         ERROR [{exc}] – skipping thread")
+            failed_count += 1
 
-    print(f"\nExported : {exported_count} thread(s) → {output_file}")
+    print(f"\nExported : {exported_count} thread(s) → {output_path}/")
     if failed_count:
         print(f"Failed   : {failed_count} thread(s)")
 
