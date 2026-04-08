@@ -215,31 +215,35 @@ def export_threads(
             seen_set.add(key)
             thread_keys.append(key)
 
-    # Incremental: skip threads that already have a file on disk
-    new_keys = [
-        (c, t) for c, t in thread_keys
+    # Threads returned by search had activity in the scan window and must be
+    # refreshed even if a file already exists (new replies may have arrived).
+    # Threads outside the window keep their existing files untouched.
+    new_count = sum(
+        1 for c, t in thread_keys
         if not (output_path / f"{c}_{t}.json").exists()
-    ]
+    )
+    refresh_count = len(thread_keys) - new_count
 
     print(
-        f"\nFound {len(thread_keys)} unique thread(s); "
-        f"{len(new_keys)} new to export.\n"
+        f"\nFound {len(thread_keys)} unique thread(s) in range "
+        f"({new_count} new, {refresh_count} to refresh).\n"
     )
 
-    if not new_keys:
-        print("Nothing new to export.")
+    if not thread_keys:
+        print("Nothing to export.")
         return
 
     # ── Step 2: fetch and write threads ────────────────────────────────────
-    print(f"Step 2 – fetching {len(new_keys)} thread(s)…")
+    print(f"Step 2 – fetching {len(thread_keys)} thread(s)…")
     exported_count = 0
     failed_count = 0
 
-    for i, (channel_id, thread_ts) in enumerate(new_keys, 1):
+    for i, (channel_id, thread_ts) in enumerate(thread_keys, 1):
         out_file = output_path / f"{channel_id}_{thread_ts}.json"
+        status = "new" if not out_file.exists() else "refresh"
         print(
-            f"  [{i:>4}/{len(new_keys)}] {out_file.name}"
-            f"  ({_ts_to_date(float(thread_ts))})",
+            f"  [{i:>4}/{len(thread_keys)}] {out_file.name}"
+            f"  ({_ts_to_date(float(thread_ts))})  [{status}]",
             flush=True,
         )
         try:
