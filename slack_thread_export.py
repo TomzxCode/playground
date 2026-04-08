@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "slack-sdk>=3.19.0",
+# ]
+# ///
 """
 Slack Thread Exporter
 
@@ -22,7 +28,8 @@ Output format (one JSON object per line):
 
 Usage:
     export SLACK_TOKEN=xoxp-...
-    python slack_thread_export.py --user @jane.doe --days 7 --output ./exports/
+    uv run slack_thread_export.py --user @jane.doe --days 7 --output ./exports/
+    # or make it executable: chmod +x slack_thread_export.py && ./slack_thread_export.py ...
 """
 
 import argparse
@@ -36,12 +43,6 @@ from typing import Generator, Optional, Set, Tuple
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-
-
-# Slack Tier-2 rate limit: 20 req/min → 3s between calls is safe.
-# Tier-3 (conversations.replies) allows 50 req/min → 1.2s is enough.
-_SEARCH_DELAY = 3.0   # seconds between search.messages calls
-_REPLIES_DELAY = 1.2  # seconds between conversations.replies calls
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +135,6 @@ def search_user_messages(
                 yield key
 
         page += 1
-        time.sleep(_SEARCH_DELAY)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +170,6 @@ def fetch_thread(
         if not response.get("has_more"):
             break
         cursor = response["response_metadata"]["next_cursor"]
-        time.sleep(_REPLIES_DELAY)
 
     return messages
 
@@ -280,7 +279,6 @@ def export_threads(
                 }
                 fh.write(json.dumps(record) + "\n")
                 exported_count += 1
-                time.sleep(_REPLIES_DELAY)
             except SlackApiError as e:
                 error = e.response.get("error", "unknown")
                 print(f"         ERROR [{error}] – skipping thread")
@@ -305,16 +303,16 @@ def main() -> None:
         epilog="""
 examples:
   # last 7 days (default)
-  python slack_thread_export.py --user @jane.doe
+  uv run slack_thread_export.py --user @jane.doe
 
   # last 30 days, custom output directory
-  python slack_thread_export.py --user @jane.doe --days 30 --output ./exports/
+  uv run slack_thread_export.py --user @jane.doe --days 30 --output ./exports/
 
   # specific end date (useful for backfills)
-  python slack_thread_export.py --user @jane.doe --days 7 --end-date 2024-01-01
+  uv run slack_thread_export.py --user @jane.doe --days 7 --end-date 2024-01-01
 
   # use user ID instead of display name (more reliable)
-  python slack_thread_export.py --user "<@U04ABCDEF>" --days 7
+  uv run slack_thread_export.py --user "<@U04ABCDEF>" --days 7
 
 token:
   Set SLACK_TOKEN env var or pass --token.
