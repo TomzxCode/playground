@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import { MILESTONES, MILESTONE_IDS } from './milestones';
-import { loadFeatures, saveFeatures, createFeature } from './storage';
+import { loadFeatures, saveFeatures, createFeature, loadSettings, saveSettings, DEFAULT_SETTINGS } from './storage';
 import { computePhaseStats, formatHours } from './analytics';
+import { parseGitHubUrl, importFromGitHub } from './github';
 import { format, parseISO } from 'date-fns';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -57,6 +58,183 @@ function AddFeatureModal({ onAdd, onClose }) {
             <button type="submit" className="btn btn-primary">Create</button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Settings Modal ──────────────────────────────────────────────────────────
+
+function SettingsModal({ settings, onSave, onClose }) {
+  const [token, setToken] = useState(settings.githubToken);
+  const [labelMap, setLabelMap] = useState({ ...settings.labelMap });
+
+  function submit(e) {
+    e.preventDefault();
+    onSave({ githubToken: token.trim(), labelMap });
+    onClose();
+  }
+
+  function setLabel(key, val) {
+    setLabelMap(m => ({ ...m, [key]: val }));
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <h2>Settings</h2>
+        <form onSubmit={submit}>
+          <div className="form-group">
+            <label>GitHub Personal Access Token</label>
+            <input
+              type="password"
+              autoFocus
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              placeholder="ghp_xxxxxxxxxxxx"
+            />
+            <div className="settings-hint">
+              Needs <code>repo</code> scope (or <code>public_repo</code> for public repos only).
+              Token is stored in your browser's localStorage.
+            </div>
+          </div>
+          <div className="settings-section-title">Label mappings</div>
+          <div className="settings-hint" style={{ marginBottom: 12 }}>
+            Which GitHub label names correspond to each milestone phase.
+          </div>
+          {[
+            { key: 'groomed', label: 'Groomed' },
+            { key: 'in_progress', label: 'In Progress' },
+            { key: 'feedback_addressed', label: 'Feedback Addressed' },
+          ].map(({ key, label }) => (
+            <div className="form-group label-map-row" key={key}>
+              <label>{label}</label>
+              <input
+                value={labelMap[key] ?? ''}
+                onChange={e => setLabel(key, e.target.value)}
+                placeholder={DEFAULT_SETTINGS.labelMap[key]}
+              />
+            </div>
+          ))}
+          <div className="modal-actions">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Import Modal ─────────────────────────────────────────────────────────────
+
+function ImportModal({ feature, settings, onApply, onClose }) {
+  const [url, setUrl] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | loading | preview | error
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  async function runImport(e) {
+    e.preventDefault();
+    const parsed = parseGitHubUrl(url);
+    if (!parsed) {
+      setError('Could not parse URL. Expected a GitHub issue or PR link.');
+      return;
+    }
+    if (!settings.githubToken) {
+      setError('No GitHub token configured. Open Settings and add your token.');
+      return;
+    }
+    setStatus('loading');
+    setError('');
+    try {
+      const data = await importFromGitHub(settings.githubToken, parsed, settings.labelMap);
+      setResult(data);
+      setStatus('preview');
+    } catch (err) {
+      setError(err.message);
+      setStatus('error');
+    }
+  }
+
+  function apply() {
+    if (!result) return;
+    // Merge: detected milestones overwrite existing; undetected are preserved
+    const merged = { ...feature.milestones, ...result.milestones };
+    onApply({
+      ...feature,
+      title: feature.title || result.title,
+      assignee: feature.assignee || result.assignee,
+      milestones: merged,
+      githubUrl: result.sourceUrl,
+    });
+    onClose();
+  }
+
+  const detectedCount = result ? Object.keys(result.milestones).length : 0;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal import-modal" onClick={e => e.stopPropagation()}>
+        <h2>Import from GitHub</h2>
+
+        {status !== 'preview' && (
+          <form onSubmit={runImport}>
+            <div className="form-group">
+              <label>Issue or PR URL</label>
+              <input
+                autoFocus
+                value={url}
+                onChange={e => { setUrl(e.target.value); setStatus('idle'); setError(''); }}
+                placeholder="https://github.com/owner/repo/issues/123"
+                disabled={status === 'loading'}
+              />
+            </div>
+            {status === 'loading' && (
+              <div className="import-status">
+                <span className="spinner" /> Fetching from GitHub…
+              </div>
+            )}
+            {(status === 'idle' || status === 'error') && error && (
+              <div className="import-error">{error}</div>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={status === 'loading'}>Import</button>
+            </div>
+          </form>
+        )}
+
+        {status === 'preview' && result && (
+          <>
+            <div className="import-summary">
+              <span className="import-count">{detectedCount} / {MILESTONE_IDS.length}</span> milestones detected
+              {result.title && <div className="import-meta">Title: <strong>{result.title}</strong></div>}
+              {result.assignee && <div className="import-meta">Assignee: <strong>{result.assignee}</strong></div>}
+            </div>
+            <div className="import-preview">
+              {MILESTONES.map(m => {
+                const ts = result.milestones[m.id];
+                return (
+                  <div className="import-preview-item" key={m.id}>
+                    <span className="import-preview-label">{m.label}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {ts && <span className="import-preview-time">{fmtDatetime(ts)}</span>}
+                      <span className={`badge ${ts ? 'badge-detected' : 'badge-skipped'}`}>
+                        {ts ? 'detected' : 'not found'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {error && <div className="import-error" style={{ marginTop: 8 }}>{error}</div>}
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={apply}>Apply to feature</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -126,7 +304,8 @@ function MilestoneRow({ milestone, prevTimestamp, timestamp, isNext, onLog }) {
 
 // ─── Feature Detail ──────────────────────────────────────────────────────────
 
-function FeatureDetail({ feature, onChange, onDelete }) {
+function FeatureDetail({ feature, settings, onChange, onDelete }) {
+  const [showImport, setShowImport] = useState(false);
   const next = nextMilestone(feature);
 
   function logMilestone(id, iso) {
@@ -141,10 +320,24 @@ function FeatureDetail({ feature, onChange, onDelete }) {
           <div className="feature-header-meta">
             {feature.assignee && <span>Assignee: {feature.assignee} &nbsp;·&nbsp;</span>}
             Created {fmtDatetime(feature.createdAt)}
+            {feature.githubUrl && (
+              <span> &nbsp;·&nbsp; <a href={feature.githubUrl} target="_blank" rel="noreferrer" className="gh-link">GitHub</a></span>
+            )}
           </div>
         </div>
-        <button className="delete-btn" onClick={() => { if (window.confirm('Delete this feature?')) onDelete(feature.id); }}>Delete</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="import-btn" onClick={() => setShowImport(true)}>↓ Import from GitHub</button>
+          <button className="delete-btn" onClick={() => { if (window.confirm('Delete this feature?')) onDelete(feature.id); }}>Delete</button>
+        </div>
       </div>
+      {showImport && (
+        <ImportModal
+          feature={feature}
+          settings={settings}
+          onApply={onChange}
+          onClose={() => setShowImport(false)}
+        />
+      )}
 
       <div className="timeline">
         {MILESTONES.map((m, i) => {
@@ -257,7 +450,7 @@ const tdStyle = { padding: '10px 12px', fontSize: 13, color: 'var(--text)' };
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-function Sidebar({ features, selectedId, onSelect, onAdd, view, onViewChange }) {
+function Sidebar({ features, selectedId, onSelect, onAdd, view, onViewChange, onOpenSettings }) {
   const [showModal, setShowModal] = useState(false);
 
   function handleAdd(feature) {
@@ -268,8 +461,13 @@ function Sidebar({ features, selectedId, onSelect, onAdd, view, onViewChange }) 
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <h1>Timeline Tracker</h1>
-        <p>Feature bottleneck analyzer</p>
+        <div className="sidebar-header-row">
+          <div>
+            <h1>Timeline Tracker</h1>
+            <p>Feature bottleneck analyzer</p>
+          </div>
+          <button className="icon-btn" title="Settings" onClick={onOpenSettings}>⚙</button>
+        </div>
       </div>
       <div className="sidebar-tabs">
         <button className={view === 'features' ? 'active' : ''} onClick={() => onViewChange('features')}>Features</button>
@@ -319,6 +517,8 @@ export default function App() {
   const [features, setFeatures] = useState(() => loadFeatures());
   const [selectedId, setSelectedId] = useState(null);
   const [view, setView] = useState('features');
+  const [settings, setSettings] = useState(() => loadSettings());
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => { saveFeatures(features); }, [features]);
 
@@ -335,6 +535,11 @@ export default function App() {
     setSelectedId(null);
   }, []);
 
+  function handleSaveSettings(updated) {
+    setSettings(updated);
+    saveSettings(updated);
+  }
+
   const selected = features.find(f => f.id === selectedId);
 
   return (
@@ -346,6 +551,7 @@ export default function App() {
         onAdd={addFeature}
         view={view}
         onViewChange={setView}
+        onOpenSettings={() => setShowSettings(true)}
       />
       <div className="main">
         {view === 'analytics' ? (
@@ -354,6 +560,7 @@ export default function App() {
           <FeatureDetail
             key={selected.id}
             feature={selected}
+            settings={settings}
             onChange={updateFeature}
             onDelete={deleteFeature}
           />
@@ -364,6 +571,13 @@ export default function App() {
           </div>
         )}
       </div>
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onSave={handleSaveSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }
