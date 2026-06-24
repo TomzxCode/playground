@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HAR Analyzer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3250;
+      --accent: #6c63ff;
+      --accent2: #00d2ff;
+      --text: #e2e8f0;
+      --muted: #7a839e;
+      --success: #22d3a0;
+      --warn: #f59e0b;
+      --danger: #f43f5e;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 18px 28px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface);
+    }
+    header h1 { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
+    header span { color: var(--muted); font-size: 13px; }
+
+    #drop-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      min-height: calc(100vh - 60px);
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    #drop-zone.over { background: rgba(108,99,255,.07); }
+    #drop-zone svg { opacity: .5; }
+    #drop-zone h2 { font-size: 22px; font-weight: 600; }
+    #drop-zone p { color: var(--muted); max-width: 380px; }
+    #drop-zone label {
+      display: inline-block;
+      padding: 10px 24px;
+      background: var(--accent);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    #drop-zone label:hover { opacity: .85; }
+    #file-input { display: none; }
+
+    #app { display: none; }
+
+    /* Top stats bar */
+    #stats-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 16px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-card {
+      flex: 1 1 130px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+    }
+    .stat-card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+    .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+
+    /* Tabs */
+    #tabs {
+      display: flex;
+      gap: 4px;
+      padding: 14px 24px 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .tab {
+      padding: 8px 18px;
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 500;
+      border: 1px solid transparent;
+      border-bottom: none;
+      transition: color .15s, background .15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--text);
+      background: var(--bg);
+      border-color: var(--border);
+    }
+
+    #content {
+      padding: 24px;
+    }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Grid of charts */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+      gap: 20px;
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .chart-card h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .chart-wrapper { position: relative; height: 280px; }
+    .chart-wrapper.tall { height: 360px; }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .controls label { color: var(--muted); font-size: 12px; }
+    .controls select, .controls input[type=range] {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .controls input[type=range] { padding: 0; width: 120px; }
+    .controls span.range-val { min-width: 24px; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      background: var(--surface2);
+      padding: 10px 14px;
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      position: sticky;
+      top: 0;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    thead th:hover { color: var(--text); }
+    thead th .sort-icon { margin-left: 4px; opacity: .5; }
+    tbody tr { border-top: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 9px 14px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    td.mono { font-family: monospace; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .badge-2 { background: rgba(34,211,160,.15); color: var(--success); }
+    .badge-3 { background: rgba(245,158,11,.15); color: var(--warn); }
+    .badge-4 { background: rgba(244,63,94,.15); color: var(--danger); }
+    .badge-5 { background: rgba(244,63,94,.25); color: var(--danger); }
+
+    .bar-inline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .bar-inline-track {
+      flex: 1;
+      height: 5px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-inline-fill { height: 100%; border-radius: 3px; background: var(--accent); }
+
+    /* Search */
+    #search-input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      width: 100%;
+      max-width: 400px;
+      margin-bottom: 14px;
+    }
+    #search-input::placeholder { color: var(--muted); }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      justify-content: flex-end;
+    }
+    .pagination button {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .pagination button:disabled { opacity: .3; cursor: default; }
+    .pagination .page-info { color: var(--muted); font-size: 12px; }
+
+    /* Waterfall */
+    #waterfall-container {
+      overflow-x: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0;
+    }
+    #waterfall-header {
+      display: grid;
+      grid-template-columns: 280px 60px 70px 1fr;
+      gap: 0;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      position: sticky;
+      top: 0;
+    }
+    .wf-row {
+      display: grid;
+      grid-template-columns: 280px 60px 70px 1fr;
+      gap: 0;
+      padding: 5px 14px;
+      border-bottom: 1px solid rgba(46,50,80,.4);
+      align-items: center;
+      font-size: 12px;
+    }
+    .wf-row:hover { background: var(--surface2); }
+    .wf-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+    .wf-url span { color: var(--text); }
+    .wf-bar-container { position: relative; height: 14px; }
+    .wf-bar {
+      position: absolute;
+      height: 10px;
+      top: 2px;
+      border-radius: 3px;
+      background: var(--accent);
+      min-width: 2px;
+    }
+    .wf-bar.slow { background: var(--danger); }
+    .wf-bar.med { background: var(--warn); }
+
+    #wf-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    #wf-controls label { color: var(--muted); font-size: 12px; }
+    #wf-controls select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 13px;
+    }
+
+    .empty { color: var(--muted); padding: 40px; text-align: center; }
+
+    /* Tooltip */
+    .chart-tooltip {
+      background: var(--surface2) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 8px !important;
+      color: var(--text) !important;
+      font-size: 12px !important;
+    }
+
+    /* Prefix explorer */
+    .prefix-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .prefix-row:hover { background: var(--surface2); }
+    .prefix-label { flex: 1; font-family: monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+    .prefix-count { color: var(--muted); font-size: 12px; min-width: 40px; text-align: right; }
+    .prefix-bar-track { width: 120px; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .prefix-bar-fill { height: 100%; border-radius: 3px; background: var(--accent2); }
+    .prefix-p50 { min-width: 70px; text-align: right; font-size: 12px; }
+    .prefix-p95 { min-width: 70px; text-align: right; font-size: 12px; color: var(--warn); }
+
+    .reset-btn {
+      display: none;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    .reset-btn.visible { display: inline-block; }
+    .reset-btn:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+  <h1>HAR Analyzer</h1>
+  <span id="file-label"></span>
+</header>
+
+<!-- Drop zone -->
+<div id="drop-zone">
+  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+  <h2>Drop a .har file here</h2>
+  <p>Or click the button below to browse. Your file is never uploaded — all analysis runs locally in your browser.</p>
+  <label>Browse file <input type="file" id="file-input" accept=".har,application/json" /></label>
+</div>
+
+<!-- Main app -->
+<div id="app">
+  <div id="stats-bar">
+    <div class="stat-card"><div class="label">Total Requests</div><div class="value" id="s-total">—</div></div>
+    <div class="stat-card"><div class="label">Total Size</div><div class="value" id="s-size">—</div></div>
+    <div class="stat-card"><div class="label">Median Duration</div><div class="value" id="s-p50">—</div></div>
+    <div class="stat-card"><div class="label">P95 Duration</div><div class="value" id="s-p95">—</div></div>
+    <div class="stat-card"><div class="label">Errors (4xx/5xx)</div><div class="value" id="s-err" style="color:var(--danger)">—</div></div>
+    <div class="stat-card"><div class="label">Time Span</div><div class="value" id="s-span">—</div></div>
+  </div>
+
+  <div id="tabs">
+    <div class="tab active" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="prefixes">By URL Prefix</div>
+    <div class="tab" data-tab="waterfall">Waterfall</div>
+    <div class="tab" data-tab="requests">All Requests</div>
+  </div>
+
+  <div id="content">
+    <!-- OVERVIEW -->
+    <div class="panel active" id="panel-overview">
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Duration Distribution (ms)</h3>
+          <div class="controls">
+            <label>Buckets</label>
+            <input type="range" id="bucket-slider" min="5" max="40" value="20" />
+            <span class="range-val" id="bucket-val">20</span>
+          </div>
+          <div class="chart-wrapper"><canvas id="chart-duration"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>HTTP Status Codes</h3>
+          <div class="chart-wrapper"><canvas id="chart-status"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Requests by Content Type</h3>
+          <div class="chart-wrapper"><canvas id="chart-ctype"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Top Domains by Request Count</h3>
+          <div class="chart-wrapper tall"><canvas id="chart-domains"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Request Methods</h3>
+          <div class="chart-wrapper"><canvas id="chart-methods"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Response Size Distribution (KB)</h3>
+          <div class="chart-wrapper"><canvas id="chart-size"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PREFIXES -->
+    <div class="panel" id="panel-prefixes">
+      <div class="chart-card" style="margin-bottom:20px">
+        <h3>Duration by URL Prefix</h3>
+        <div class="controls">
+          <label>Group by depth</label>
+          <select id="prefix-depth">
+            <option value="1">1 segment</option>
+            <option value="2" selected>2 segments</option>
+            <option value="3">3 segments</option>
+            <option value="4">4 segments</option>
+          </select>
+          <label style="margin-left:8px">Sort by</label>
+          <select id="prefix-sort">
+            <option value="count">Count</option>
+            <option value="p50">Median duration</option>
+            <option value="p95">P95 duration</option>
+            <option value="total">Total time</option>
+          </select>
+          <label style="margin-left:8px">Top</label>
+          <select id="prefix-top">
+            <option value="20" selected>20</option>
+            <option value="40">40</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="chart-wrapper tall"><canvas id="chart-prefix-dur"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <h3>Prefix Explorer — click a row to drill down</h3>
+        <button class="reset-btn" id="prefix-reset">↑ Back</button>
+        <div id="prefix-table"></div>
+      </div>
+    </div>
+
+    <!-- WATERFALL -->
+    <div class="panel" id="panel-waterfall">
+      <div id="wf-controls">
+        <label>Sort by</label>
+        <select id="wf-sort">
+          <option value="start">Start time</option>
+          <option value="duration">Duration (slowest first)</option>
+        </select>
+        <label style="margin-left:8px">Filter method</label>
+        <select id="wf-method">
+          <option value="">All</option>
+        </select>
+        <label style="margin-left:8px">Min duration (ms)</label>
+        <input type="range" id="wf-min-dur" min="0" max="5000" step="50" value="0" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:0;width:120px;cursor:pointer;" />
+        <span id="wf-min-val" style="color:var(--muted);font-size:12px;min-width:48px">0 ms</span>
+      </div>
+      <div id="waterfall-container">
+        <div id="waterfall-header">
+          <div>URL</div><div>Method</div><div>Status</div><div>Timeline</div>
+        </div>
+        <div id="waterfall-rows"></div>
+      </div>
+    </div>
+
+    <!-- ALL REQUESTS -->
+    <div class="panel" id="panel-requests">
+      <input type="text" id="search-input" placeholder="Filter by URL, method, status…" />
+      <div class="table-wrap">
+        <table id="req-table">
+          <thead>
+            <tr>
+              <th data-col="url">URL <span class="sort-icon">↕</span></th>
+              <th data-col="method">Method <span class="sort-icon">↕</span></th>
+              <th data-col="status">Status <span class="sort-icon">↕</span></th>
+              <th data-col="duration">Duration <span class="sort-icon">↕</span></th>
+              <th data-col="size">Size <span class="sort-icon">↕</span></th>
+              <th data-col="type">Type <span class="sort-icon">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="req-tbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button id="prev-page">‹ Prev</button>
+        <span class="page-info" id="page-info"></span>
+        <button id="next-page">Next ›</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let entries = [];
+let charts = {};
+let reqPage = 1;
+const PAGE_SIZE = 50;
+let reqSort = { col: 'duration', dir: -1 };
+let reqFilter = '';
+let prefixStack = [];
+
+// ─── Colour palette ──────────────────────────────────────────────────────────
+const PALETTE = [
+  '#6c63ff','#00d2ff','#22d3a0','#f59e0b','#f43f5e',
+  '#818cf8','#38bdf8','#4ade80','#fb923c','#e879f9',
+  '#facc15','#34d399','#60a5fa','#f472b6','#a78bfa',
+];
+
+function color(i) { return PALETTE[i % PALETTE.length]; }
+
+// ─── Chart.js defaults ───────────────────────────────────────────────────────
+Chart.defaults.color = '#7a839e';
+Chart.defaults.borderColor = '#2e3250';
+Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+const tooltipDefaults = {
+  backgroundColor: '#22263a',
+  borderColor: '#2e3250',
+  borderWidth: 1,
+  titleColor: '#e2e8f0',
+  bodyColor: '#7a839e',
+  padding: 10,
+  cornerRadius: 8,
+};
+
+// ─── HAR parsing ─────────────────────────────────────────────────────────────
+function parseHar(har) {
+  const raw = har?.log?.entries ?? [];
+  return raw.map(e => {
+    const req = e.request ?? {};
+    const res = e.response ?? {};
+    const timings = e.timings ?? {};
+    const duration = typeof e.time === 'number' ? e.time : 0;
+    const url = req.url ?? '';
+    let host = '';
+    let pathname = '';
+    try { const u = new URL(url); host = u.hostname; pathname = u.pathname; } catch {}
+    const bodySize = (res.bodySize ?? 0) < 0 ? 0 : (res.bodySize ?? 0);
+    const contentType = (res.content?.mimeType ?? '').split(';')[0].trim();
+    const startedAt = e.startedDateTime ? new Date(e.startedDateTime).getTime() : 0;
+    return { url, pathname, host, method: req.method ?? '', status: res.status ?? 0,
+             duration, bodySize, contentType, startedAt, timings };
+  });
+}
+
+// ─── Stats ───────────────────────────────────────────────────────────────────
+function percentile(sorted, p) {
+  if (!sorted.length) return 0;
+  const i = Math.ceil(p / 100 * sorted.length) - 1;
+  return sorted[Math.max(0, i)];
+}
+
+function fmtMs(ms) {
+  if (ms < 1000) return Math.round(ms) + ' ms';
+  return (ms / 1000).toFixed(2) + ' s';
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(2) + ' MB';
+}
+
+function fmtNum(n) {
+  return n.toLocaleString();
+}
+
+function updateStats() {
+  const durations = entries.map(e => e.duration).sort((a,b) => a - b);
+  const totalSize = entries.reduce((s, e) => s + e.bodySize, 0);
+  const errors = entries.filter(e => e.status >= 400).length;
+  const times = entries.map(e => e.startedAt).filter(Boolean);
+  const span = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
+
+  document.getElementById('s-total').textContent = fmtNum(entries.length);
+  document.getElementById('s-size').textContent = fmtBytes(totalSize);
+  document.getElementById('s-p50').textContent = fmtMs(percentile(durations, 50));
+  document.getElementById('s-p95').textContent = fmtMs(percentile(durations, 95));
+  document.getElementById('s-err').textContent = fmtNum(errors);
+  document.getElementById('s-span').textContent = fmtMs(span);
+}
+
+// ─── Histogram helper ─────────────────────────────────────────────────────────
+function histogram(values, buckets) {
+  if (!values.length) return { labels: [], data: [] };
+  const min = 0, max = Math.max(...values);
+  const step = Math.ceil(max / buckets);
+  const labels = [], data = [];
+  for (let i = 0; i < buckets; i++) {
+    const lo = i * step, hi = (i + 1) * step;
+    labels.push(`${lo}–${hi}`);
+    data.push(values.filter(v => v >= lo && v < hi).length);
+  }
+  return { labels, data };
+}
+
+// ─── Chart builders ──────────────────────────────────────────────────────────
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function buildDurationChart(buckets = 20) {
+  destroyChart('duration');
+  const vals = entries.map(e => e.duration);
+  const { labels, data } = histogram(vals, buckets);
+  charts['duration'] = new Chart(document.getElementById('chart-duration'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Requests', data, backgroundColor: '#6c63ffaa', borderColor: '#6c63ff', borderWidth: 1 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults } },
+      scales: { x: { ticks: { maxRotation: 45 } }, y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+function buildStatusChart() {
+  destroyChart('status');
+  const counts = {};
+  entries.forEach(e => {
+    const g = Math.floor(e.status / 100) * 100;
+    counts[g] = (counts[g] ?? 0) + 1;
+  });
+  const labels = Object.keys(counts).sort();
+  const statusColors = { 100:'#818cf8',200:'#22d3a0',300:'#f59e0b',400:'#f43f5e',500:'#ff3a3a',0:'#7a839e' };
+  charts['status'] = new Chart(document.getElementById('chart-status'), {
+    type: 'doughnut',
+    data: {
+      labels: labels.map(l => `${l}–${+l+99}`),
+      datasets: [{ data: labels.map(l => counts[l]),
+                   backgroundColor: labels.map(l => statusColors[+l] ?? '#888'),
+                   borderWidth: 2, borderColor: '#1a1d27' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right' }, tooltip: { ...tooltipDefaults } }
+    }
+  });
+}
+
+function buildContentTypeChart() {
+  destroyChart('ctype');
+  const counts = {};
+  entries.forEach(e => {
+    const t = e.contentType || 'unknown';
+    counts[t] = (counts[t] ?? 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0, 10);
+  charts['ctype'] = new Chart(document.getElementById('chart-ctype'), {
+    type: 'doughnut',
+    data: {
+      labels: sorted.map(([t]) => t),
+      datasets: [{ data: sorted.map(([,c]) => c),
+                   backgroundColor: sorted.map((_, i) => color(i)),
+                   borderWidth: 2, borderColor: '#1a1d27' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { font: { size: 11 } } }, tooltip: { ...tooltipDefaults } }
+    }
+  });
+}
+
+function buildDomainsChart() {
+  destroyChart('domains');
+  const counts = {};
+  entries.forEach(e => { counts[e.host || 'unknown'] = (counts[e.host || 'unknown'] ?? 0) + 1; });
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0, 15);
+  charts['domains'] = new Chart(document.getElementById('chart-domains'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(([h]) => h),
+      datasets: [{ label: 'Requests', data: sorted.map(([,c]) => c),
+                   backgroundColor: sorted.map((_, i) => color(i)) }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { ticks: { font: { size: 11 } } } }
+    }
+  });
+}
+
+function buildMethodsChart() {
+  destroyChart('methods');
+  const counts = {};
+  entries.forEach(e => { counts[e.method || 'unknown'] = (counts[e.method || 'unknown'] ?? 0) + 1; });
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  charts['methods'] = new Chart(document.getElementById('chart-methods'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(([m]) => m),
+      datasets: [{ label: 'Requests', data: sorted.map(([,c]) => c),
+                   backgroundColor: sorted.map((_, i) => color(i)), borderRadius: 6 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+function buildSizeChart() {
+  destroyChart('size');
+  const vals = entries.map(e => e.bodySize / 1024);
+  const { labels, data } = histogram(vals, 20);
+  charts['size'] = new Chart(document.getElementById('chart-size'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Requests', data, backgroundColor: '#00d2ffaa', borderColor: '#00d2ff', borderWidth: 1 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults } },
+      scales: { x: { ticks: { maxRotation: 45 } }, y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+// ─── Prefix analysis ──────────────────────────────────────────────────────────
+function getPrefix(url, depth) {
+  try {
+    const u = new URL(url);
+    const segs = u.pathname.split('/').filter(Boolean).slice(0, depth);
+    return u.hostname + (segs.length ? '/' + segs.join('/') : '');
+  } catch { return url.slice(0, 40); }
+}
+
+function groupByPrefix(ents, depth) {
+  const map = {};
+  ents.forEach(e => {
+    const k = getPrefix(e.url, depth);
+    if (!map[k]) map[k] = [];
+    map[k].push(e.duration);
+  });
+  return Object.entries(map).map(([prefix, durs]) => {
+    const s = [...durs].sort((a,b) => a-b);
+    return { prefix, count: durs.length,
+             p50: percentile(s, 50), p95: percentile(s, 95),
+             p99: percentile(s, 99), total: durs.reduce((a,b) => a+b, 0) };
+  });
+}
+
+function buildPrefixChart() {
+  destroyChart('prefix-dur');
+  const depth = +document.getElementById('prefix-depth').value;
+  const sortBy = document.getElementById('prefix-sort').value;
+  const top = +document.getElementById('prefix-top').value;
+
+  let groups = groupByPrefix(entries, depth);
+  groups.sort((a,b) => b[sortBy] - a[sortBy]);
+  groups = groups.slice(0, top);
+
+  const labels = groups.map(g => g.prefix);
+  charts['prefix-dur'] = new Chart(document.getElementById('chart-prefix-dur'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Median (ms)', data: groups.map(g => g.p50), backgroundColor: '#6c63ffaa', borderColor: '#6c63ff', borderWidth: 1 },
+        { label: 'P95 (ms)',    data: groups.map(g => g.p95), backgroundColor: '#f59e0baa', borderColor: '#f59e0b', borderWidth: 1 },
+        { label: 'P99 (ms)',    data: groups.map(g => g.p99), backgroundColor: '#f43f5eaa', borderColor: '#f43f5e', borderWidth: 1 },
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' }, tooltip: { ...tooltipDefaults,
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmtMs(ctx.raw)}` } } },
+      scales: { x: { beginAtZero: true }, y: { ticks: { font: { size: 10 } } } }
+    }
+  });
+}
+
+function buildPrefixTable() {
+  const depth = +document.getElementById('prefix-depth').value;
+  const sortBy = document.getElementById('prefix-sort').value;
+
+  // Filter entries to current drill-down
+  let base = entries;
+  if (prefixStack.length) {
+    const current = prefixStack[prefixStack.length - 1];
+    base = entries.filter(e => {
+      try { const u = new URL(e.url); return (u.hostname + u.pathname).startsWith(current); }
+      catch { return e.url.startsWith(current); }
+    });
+  }
+
+  let groups = groupByPrefix(base, depth);
+  groups.sort((a,b) => b[sortBy] - a[sortBy]);
+  const maxCount = Math.max(...groups.map(g => g.count));
+
+  const btn = document.getElementById('prefix-reset');
+  btn.classList.toggle('visible', prefixStack.length > 0);
+  btn.textContent = prefixStack.length > 0 ? `↑ Back to: ${prefixStack[prefixStack.length-2] ?? 'All'}` : '';
+
+  const container = document.getElementById('prefix-table');
+  if (!groups.length) { container.innerHTML = '<div class="empty">No data</div>'; return; }
+
+  container.innerHTML = `
+    <div style="display:flex;gap:8px;padding:6px 12px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">
+      <div style="flex:1">Prefix</div>
+      <div style="min-width:40px;text-align:right">Count</div>
+      <div style="width:120px"></div>
+      <div style="min-width:70px;text-align:right">Median</div>
+      <div style="min-width:70px;text-align:right">P95</div>
+    </div>
+    ${groups.map(g => `
+      <div class="prefix-row" data-prefix="${g.prefix}">
+        <div class="prefix-label">${g.prefix}</div>
+        <div class="prefix-count">${g.count}</div>
+        <div class="prefix-bar-track"><div class="prefix-bar-fill" style="width:${100*g.count/maxCount}%"></div></div>
+        <div class="prefix-p50">${fmtMs(g.p50)}</div>
+        <div class="prefix-p95">${fmtMs(g.p95)}</div>
+      </div>
+    `).join('')}
+  `;
+
+  container.querySelectorAll('.prefix-row').forEach(row => {
+    row.addEventListener('click', () => {
+      prefixStack.push(row.dataset.prefix);
+      buildPrefixTable();
+    });
+  });
+}
+
+// ─── Waterfall ───────────────────────────────────────────────────────────────
+function buildWaterfall() {
+  const sortBy = document.getElementById('wf-sort').value;
+  const filterMethod = document.getElementById('wf-method').value;
+  const minDur = +document.getElementById('wf-min-dur').value;
+  document.getElementById('wf-min-val').textContent = minDur + ' ms';
+
+  let ents = entries.filter(e => e.duration >= minDur);
+  if (filterMethod) ents = ents.filter(e => e.method === filterMethod);
+  if (sortBy === 'start') ents = [...ents].sort((a,b) => a.startedAt - b.startedAt);
+  else ents = [...ents].sort((a,b) => b.duration - a.duration);
+
+  const display = ents.slice(0, 300);
+  if (!display.length) { document.getElementById('waterfall-rows').innerHTML = '<div class="empty">No requests match filters</div>'; return; }
+
+  const tMin = Math.min(...display.map(e => e.startedAt).filter(Boolean));
+  const tMax = Math.max(...display.map(e => e.startedAt + e.duration).filter(Boolean));
+  const span = tMax - tMin || 1;
+  const maxDur = Math.max(...display.map(e => e.duration));
+
+  document.getElementById('waterfall-rows').innerHTML = display.map(e => {
+    const left = tMin > 0 ? ((e.startedAt - tMin) / span * 100).toFixed(2) : 0;
+    const width = Math.max((e.duration / span * 100), 0.3).toFixed(2);
+    const cls = e.duration > maxDur * 0.7 ? 'slow' : e.duration > maxDur * 0.3 ? 'med' : '';
+    const sc = Math.floor(e.status/100);
+    const badgeCls = `badge-${sc}`;
+    const name = (() => { try { const u = new URL(e.url); return `<span style="color:var(--muted)">${u.hostname}</span>${u.pathname}`; } catch { return e.url.slice(0,60); } })();
+    return `<div class="wf-row" title="${e.url} — ${fmtMs(e.duration)}">
+      <div class="wf-url">${name}</div>
+      <div style="color:var(--accent2)">${e.method}</div>
+      <div><span class="badge ${badgeCls}">${e.status}</span></div>
+      <div class="wf-bar-container">
+        <div class="wf-bar ${cls}" style="left:${left}%;width:${width}%" title="${fmtMs(e.duration)}"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function populateWaterfallMethods() {
+  const methods = [...new Set(entries.map(e => e.method))].sort();
+  const sel = document.getElementById('wf-method');
+  methods.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
+}
+
+// ─── Requests table ──────────────────────────────────────────────────────────
+function filteredEntries() {
+  const q = reqFilter.toLowerCase();
+  if (!q) return entries;
+  return entries.filter(e =>
+    e.url.toLowerCase().includes(q) ||
+    e.method.toLowerCase().includes(q) ||
+    String(e.status).includes(q) ||
+    e.contentType.toLowerCase().includes(q)
+  );
+}
+
+function sortedEntries() {
+  const fe = filteredEntries();
+  return [...fe].sort((a,b) => {
+    const av = a[reqSort.col], bv = b[reqSort.col];
+    if (typeof av === 'number') return (av - bv) * reqSort.dir;
+    return String(av).localeCompare(String(bv)) * reqSort.dir;
+  });
+}
+
+function renderTable() {
+  const data = sortedEntries();
+  const total = data.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  reqPage = Math.min(reqPage, pages);
+  const slice = data.slice((reqPage-1)*PAGE_SIZE, reqPage*PAGE_SIZE);
+  const maxDur = Math.max(...data.map(e => e.duration));
+
+  document.getElementById('req-tbody').innerHTML = slice.map(e => {
+    const sc = Math.floor(e.status/100);
+    const shortUrl = (() => { try { const u = new URL(e.url); return u.pathname + u.search; } catch { return e.url; } })();
+    const pct = maxDur > 0 ? (e.duration / maxDur * 100).toFixed(1) : 0;
+    return `<tr>
+      <td class="mono" title="${e.url}">${shortUrl}</td>
+      <td style="color:var(--accent2)">${e.method}</td>
+      <td><span class="badge badge-${sc}">${e.status}</span></td>
+      <td>
+        <div class="bar-inline">
+          <span style="min-width:65px">${fmtMs(e.duration)}</span>
+          <div class="bar-inline-track"><div class="bar-inline-fill" style="width:${pct}%"></div></div>
+        </div>
+      </td>
+      <td>${fmtBytes(e.bodySize)}</td>
+      <td style="color:var(--muted)">${e.contentType || '—'}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="empty">No results</td></tr>';
+
+  document.getElementById('page-info').textContent = `Page ${reqPage} of ${pages} (${total} requests)`;
+  document.getElementById('prev-page').disabled = reqPage <= 1;
+  document.getElementById('next-page').disabled = reqPage >= pages;
+
+  // Update sort icons
+  document.querySelectorAll('#req-table thead th').forEach(th => {
+    const icon = th.querySelector('.sort-icon');
+    if (!icon) return;
+    if (th.dataset.col === reqSort.col) icon.textContent = reqSort.dir > 0 ? '↑' : '↓';
+    else icon.textContent = '↕';
+  });
+}
+
+// ─── Load & render ────────────────────────────────────────────────────────────
+function load(har) {
+  entries = parseHar(har);
+  if (!entries.length) { alert('No HAR entries found. Is this a valid .har file?'); return; }
+
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+
+  updateStats();
+  buildDurationChart(20);
+  buildStatusChart();
+  buildContentTypeChart();
+  buildDomainsChart();
+  buildMethodsChart();
+  buildSizeChart();
+  buildPrefixChart();
+  buildPrefixTable();
+  populateWaterfallMethods();
+  buildWaterfall();
+  renderTable();
+}
+
+// ─── File input ───────────────────────────────────────────────────────────────
+function readFile(file) {
+  if (!file) return;
+  document.getElementById('file-label').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try { load(JSON.parse(e.target.result)); }
+    catch { alert('Failed to parse file. Make sure it is a valid HAR JSON file.'); }
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('file-input').addEventListener('change', e => readFile(e.target.files[0]));
+
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); readFile(e.dataTransfer.files[0]); });
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+});
+
+// ─── Overview controls ────────────────────────────────────────────────────────
+const bucketSlider = document.getElementById('bucket-slider');
+const bucketVal = document.getElementById('bucket-val');
+bucketSlider.addEventListener('input', () => {
+  bucketVal.textContent = bucketSlider.value;
+  buildDurationChart(+bucketSlider.value);
+});
+
+// ─── Prefix controls ─────────────────────────────────────────────────────────
+['prefix-depth','prefix-sort','prefix-top'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => {
+    prefixStack = [];
+    buildPrefixChart();
+    buildPrefixTable();
+  });
+});
+
+document.getElementById('prefix-reset').addEventListener('click', () => {
+  prefixStack.pop();
+  buildPrefixTable();
+});
+
+// ─── Waterfall controls ───────────────────────────────────────────────────────
+['wf-sort','wf-method'].forEach(id => document.getElementById(id).addEventListener('change', buildWaterfall));
+document.getElementById('wf-min-dur').addEventListener('input', buildWaterfall);
+
+// ─── Table controls ───────────────────────────────────────────────────────────
+document.getElementById('search-input').addEventListener('input', e => {
+  reqFilter = e.target.value;
+  reqPage = 1;
+  renderTable();
+});
+
+document.querySelectorAll('#req-table thead th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    if (reqSort.col === th.dataset.col) reqSort.dir *= -1;
+    else { reqSort.col = th.dataset.col; reqSort.dir = -1; }
+    reqPage = 1;
+    renderTable();
+  });
+});
+
+document.getElementById('prev-page').addEventListener('click', () => { reqPage--; renderTable(); });
+document.getElementById('next-page').addEventListener('click', () => { reqPage++; renderTable(); });
+</script>
+</body>
+</html>
