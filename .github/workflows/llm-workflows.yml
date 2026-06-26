@@ -44,6 +44,6 @@ jobs:
       model: ${{ inputs.model }}
       agents-repository: ${{ inputs.agents-repository }}
       framework-repository: ${{ inputs.framework-repository }}
-      framework-ref: ${{ inputs.framework-ref }}
+      framework-ref: generic-workflows
       rule-id: ${{ inputs.rule-id }}
     secrets: inherit
